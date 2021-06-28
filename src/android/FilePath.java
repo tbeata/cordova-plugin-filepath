@@ -18,6 +18,7 @@ import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CordovaWebView;
+import org.apache.cordova.LOG;
 import org.apache.cordova.PermissionHelper;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -205,16 +206,18 @@ public class FilePath extends CordovaPlugin {
 
         Cursor cursor = null;
         final String column = "_data";
+    //final String column = MediaStore.Files.FileColumns.RELATIVE_PATH;
         final String[] projection = {
                 column
+
         };
 
         try {
             cursor = context.getContentResolver().query(uri, projection, selection, selectionArgs,
                     null);
             if (cursor != null && cursor.moveToFirst()) {
-                final int column_index = cursor.getColumnIndexOrThrow(column);
-                return cursor.getString(column_index);
+                    final int column_index = cursor.getColumnIndexOrThrow(column);
+                    return cursor.getString(column_index);
             }
         } finally {
             if (cursor != null)
@@ -301,6 +304,46 @@ public class FilePath extends CordovaPlugin {
         return "";
     }
 
+    private static String getDownloadsDocumentPath(final Context context, final Uri uri) {
+        Cursor cursor = null;
+        try {
+            cursor = context.getContentResolver().query(uri, new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                String fileName = cursor.getString(0);
+                String path = Environment.getExternalStorageDirectory().toString() + "/Download/" + fileName;
+                if (fileExists(path)) {
+                    return path;
+                }
+            }
+        } finally {
+            if (cursor != null)
+                cursor.close();
+        }
+        //
+        final String id = DocumentsContract.getDocumentId(uri);
+        String[] contentUriPrefixesToTry = new String[]{
+                "content://downloads/public_downloads",
+                "content://downloads/my_downloads"
+        };
+
+        for (String contentUriPrefix : contentUriPrefixesToTry) {
+            Uri contentUri = ContentUris.withAppendedId(Uri.parse(contentUriPrefix), Long.valueOf(id));
+            try {
+                String path = getDataColumn(context, contentUri, null, null);
+                if (path != null) {
+                    return path;
+                }
+            } catch (Exception e) {
+            }
+        }
+
+        try {
+            return getDriveFilePath(uri, context);
+        } catch (Exception e) {
+            return uri.getPath();
+        }
+
+    }
     /**
      * Get a file path from a Uri. This will get the the path for Storage Access
      * Framework Documents, as well as the _data field for the MediaStore and
@@ -345,44 +388,7 @@ public class FilePath extends CordovaPlugin {
             // DownloadsProvider
             else if (isDownloadsDocument(uri)) {
                 // thanks to https://github.com/hiddentao/cordova-plugin-filepath/issues/34#issuecomment-430129959
-                Cursor cursor = null;
-                try {
-                    cursor = context.getContentResolver().query(uri, new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, null, null, null);
-                    if (cursor != null && cursor.moveToFirst()) {
-                        String fileName = cursor.getString(0);
-                        String path = Environment.getExternalStorageDirectory().toString() + "/Download/" + fileName;
-                        if (fileExists(path)) {
-                            return path;
-                        }
-                    }
-                } finally {
-                    if (cursor != null)
-                        cursor.close();
-                }
-                //
-                final String id = DocumentsContract.getDocumentId(uri);
-                String[] contentUriPrefixesToTry = new String[]{
-                        "content://downloads/public_downloads",
-                        "content://downloads/my_downloads"
-                };
-
-                for (String contentUriPrefix : contentUriPrefixesToTry) {
-                    Uri contentUri = ContentUris.withAppendedId(Uri.parse(contentUriPrefix), Long.valueOf(id));
-                    try {
-                        String path = getDataColumn(context, contentUri, null, null);
-                        if (path != null) {
-                            return path;
-                        }
-                    } catch (Exception e) {
-                    }
-                }
-
-                try {
-                    return getDriveFilePath(uri, context);
-                } catch (Exception e) {
-                    return uri.getPath();
-                }
-
+                return getDownloadsDocumentPath(context, uri);
             }
             // MediaProvider
             else if (isMediaDocument(uri)) {
@@ -406,7 +412,12 @@ public class FilePath extends CordovaPlugin {
                         split[1]
                 };
 
-                return getDataColumn(context, contentUri, selection, selectionArgs);
+               // return getDataColumn(context, contentUri, selection, selectionArgs);
+                String path = getDataColumn(context, contentUri, selection, selectionArgs);
+                if (path == null) {
+                    path = getDownloadsDocumentPath(context, uri);
+                }
+                return path;
             } else if (isGoogleDriveUri(uri)) {
                 return getDriveFilePath(uri, context);
             }
